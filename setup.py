@@ -7,6 +7,10 @@ setup(
     url="https://github.com/pirl-lab/diffroomacoustics",
     author="pirl-lab",
     license="MIT",
-    packages=["ism", "metrics"],
+    packages=[
+        "diffroomacoustics",
+        "diffroomacoustics.ism",
+        "diffroomacoustics.metrics",
+    ],
     install_requires=["numpy", "torch", "torchaudio"],
 )
