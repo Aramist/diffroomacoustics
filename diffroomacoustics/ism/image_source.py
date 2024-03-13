@@ -39,6 +39,7 @@ def get_rir(
     render_tail=True,
     sigma=IMPULSE_SIGMA,
 ):
+    device = src_loc.device
     batch_dims = max(
         room_dims.shape[:-1],
         room_mat.shape[:-2],
@@ -54,6 +55,7 @@ def get_rir(
         impulse_func = lambda t: torch.exp(-1.0 * torch.square(t / sigma)) * (t >= 0.0)
     timestamp = torch.arange(rir_len) / srate
     timestamp = timestamp.view((1,) * len(batch_dims) + timestamp.shape)
+    timestamp = timestamp.to(device)
     direct_delay = (
         torch.sqrt(torch.sum(torch.square(src_loc - mic_loc), dim=-1, keepdim=True))
         / mach
@@ -64,11 +66,15 @@ def get_rir(
         delay_offset = 0.0
     # precompute lattice values (coordinates, reflectivity)
     # shape of (order, 3, 2) for order max reflections, 3 dimensions, and 2 directions (negative, positive); computed independently in each dim
-    lattice_coords = torch.empty(batch_dims + (order + 1, 3, 2), requires_grad=False)
+    lattice_coords = torch.empty(
+        batch_dims + (order + 1, 3, 2), requires_grad=False, device=device
+    )
     lattice_coords[..., 0, :, :] = torch.unsqueeze(src_loc.clone(), dim=-1).expand(
         src_loc.shape + (2,)
     )
-    lattice_ref = torch.empty(batch_dims + (order + 1, 3, 2), requires_grad=False)
+    lattice_ref = torch.empty(
+        batch_dims + (order + 1, 3, 2), requires_grad=False, device=device
+    )
     lattice_ref[..., 0, :, :] = torch.ones(batch_dims + (3, 2))
     lattice_d = 2.0 * torch.stack(
         [0.5 * room_dims + src_loc, 0.5 * room_dims - src_loc], dim=-2
@@ -95,7 +101,7 @@ def get_rir(
         dtype=np.intc,
     )
     # compute image sources
-    rir = torch.zeros(batch_dims + (rir_len,))
+    rir = torch.zeros(batch_dims + (rir_len,), device=device)
     if render_tail:
         max_order_amp = []
         max_order_delay = []
@@ -154,7 +160,7 @@ def get_rir(
         )
         tail = torch.sum(
             0.5
-            * torch.randn(timestamp.shape + tail_env.shape[-1:])
+            * torch.randn(timestamp.shape + tail_env.shape[-1:], device=device)
             * tail_env
             / max(6.0, order),
             dim=-1,
