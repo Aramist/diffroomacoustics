@@ -1,8 +1,40 @@
+from typing import Optional
+
 import numpy as np
 import torch
 from torch import autograd, fft
 
 from ..defaults import *
+
+
+def compute_directivity_response(
+    rec_pos: torch.Tensor,
+    rec_direction: torch.Tensor,
+    src_pos: torch.Tensor,
+    a: torch.Tensor,
+    b: torch.Tensor,
+) -> torch.Tensor:
+    """Compute the directivity response of a microphone at rec_pos
+    to a source at src_pos
+    a and b are the directivity parameters of the equation r = |a + b * cos(theta)|
+    a and b should be in (0, 1)
+
+    Args:
+        rec_pos (torch.Tensor): Position of the microphone(s) (N, 3)
+        rec_direction (torch.Tensor): Direction of the microphone(s) (N, 3)
+        src_pos (torch.Tensor): Position of the source(s) (S, 3)
+        a (torch.Tensor): Directivity parameter (scalar)
+        b (torch.Tensor): Directivity parameter (scalar)
+    """
+
+    # Compute cos(theta)
+    rec_to_src = src_pos - rec_pos
+    rec_to_src = rec_to_src / torch.norm(rec_to_src, dim=-1, keepdim=True)
+    rec_direction = rec_direction / torch.norm(rec_direction, dim=-1, keepdim=True)
+    cos_theta = torch.einsum("...i,...i->...", rec_to_src, rec_direction)
+
+    # Compute the directivity response
+    return torch.abs(a + b * cos_theta)
 
 
 # RIR generator for room simulation
@@ -29,6 +61,7 @@ def get_rir(
     room_mat,
     src_loc,
     mic_loc,
+    *,
     order=REF_ORDER,
     srate=SRATE,
     rir_len=RIR_LEN,
@@ -38,6 +71,8 @@ def get_rir(
     eval=False,
     render_tail=True,
     sigma=IMPULSE_SIGMA,
+    directivity_params: tuple[float, float] = (1.0, 0.0),
+    mic_direction: Optional[torch.Tensor] = None,
 ):
     device = src_loc.device
     batch_dims = max(
@@ -131,7 +166,14 @@ def get_rir(
                             * lattice_ref[..., l_j, 1, quad_bi[1]]
                             * lattice_ref[..., l_k, 2, quad_bi[2]]
                         )
+                        # Here, im_loc and mic_loc have shape: (batch (num_src), num_mics, 3)
                         delay, atten = compute_path_t(im_loc, mic_loc, attenuation)
+                        if mic_direction is not None:
+                            directivity = compute_directivity_response(
+                                mic_loc, mic_direction, im_loc, *directivity_params
+                            )
+                            atten = atten * directivity
+                        # directivity = compute_directivity()
                         if len(batch_dims) > 0:
                             im_ref = im_ref[..., None]
                             atten = atten[..., None]
